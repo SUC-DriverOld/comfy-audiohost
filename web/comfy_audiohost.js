@@ -7,9 +7,12 @@ const PARAMS_WIDGET = "param_values";
 const POLL_INTERVAL_MS = 3000;
 const MAX_SIDECHAIN_SLOTS = 3;
 const NODE_WIDTH = 300;
-// Width of the inline "Delete" button drawn at the right end of each
-// parameter slider row.
-const REMOVE_STRIP = 48;
+// Inline "Delete" button on each parameter slider row. WIDGET_MARGIN matches
+// litegraph's BaseWidget.margin so the button's right edge lines up with the
+// regular widgets (buttons, combos) above it.
+const WIDGET_MARGIN = 15;
+const DELETE_WIDTH = 40;
+const DELETE_GAP = 6;
 
 function getWidget(node, name) {
   return node.widgets?.find((widget) => widget.name === name);
@@ -192,7 +195,7 @@ function rebuildParamWidgets(node) {
     // widget.width mirrors the value because the frontend sizes the +/- arrow
     // click zones from width || node width.
     slider.draw = (ctx, canvas, width, showText) => {
-      slider.width = Math.max(60, node.size[0] - REMOVE_STRIP + 12);
+      slider.width = Math.max(60, node.size[0] - DELETE_WIDTH - DELETE_GAP);
       slider.drawWidget(ctx, { width: slider.width, showText: showText !== false });
     };
   }
@@ -216,9 +219,9 @@ function drawRemoveButtons(ctx, node) {
   for (const widget of node.widgets ?? []) {
     const name = String(widget?.name ?? "");
     if (!name.startsWith("param:") || widget.hidden) continue;
-    const x = node.size[0] - REMOVE_STRIP + 3;
+    const width = DELETE_WIDTH;
+    const x = node.size[0] - WIDGET_MARGIN - width;
     const y = widget.y + 1;
-    const width = REMOVE_STRIP - 8;
     const height = Math.max(12, (widget.height ?? 20) - 3);
     ctx.save();
     ctx.fillStyle = "#222222";

@@ -179,7 +179,8 @@ function rebuildParamWidgets(node) {
       spec.name,
       Number(spec.value) || 0,
       (value) => onParamChanged(node, id, value),
-      { min: 0, max: 1, step: 0.001 }
+      // step2 is the frontend's per-click increment (step*0.1 otherwise).
+      { min: 0, max: 1, step: 0.001, step2: 0.001 }
     );
     slider.name = paramWidgetName(id);
     slider.label = spec.name;
@@ -232,8 +233,8 @@ function drawRemoveButtons(ctx, node) {
 }
 
 // Intercept clicks on the inline "×" buttons before litegraph hands the
-// event to the underlying slider widget. Bound to window capture so it runs
-// ahead of the canvas listeners no matter how the frontend exposes them.
+// event to the underlying slider widget. The canvas listens for pointer
+// events (not mouse events), so this hooks window capture on pointerdown.
 function handleRemoveClick(event) {
   const canvas = app.canvas;
   if (!canvas?.convertEventToCanvasOffset || !app.graph?._nodes) return;
@@ -532,6 +533,6 @@ app.registerExtension({
     if (nodeData.name === NODE_TYPE) registerAudioHostNode(nodeType);
   },
   setup() {
-    window.addEventListener("mousedown", handleRemoveClick, true);
+    window.addEventListener("pointerdown", handleRemoveClick, true);
   },
 });

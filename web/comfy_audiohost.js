@@ -495,6 +495,7 @@ function registerAudioHostNode(nodeType) {
 
     fitNodeSize(this);
     scheduleNodeInputSync(this);
+    scheduleBusSync(this);
     syncPluginChoices(this);
     requestParams(this);
     return result;

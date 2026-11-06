@@ -12,7 +12,7 @@ import {
   resetPluginDependentState,
   syncPluginChoices,
 } from "./comfy_audiohost/plugin_list.js";
-import { openEditor } from "./comfy_audiohost/session.js";
+import { toggleEditor, updateEditorButton } from "./comfy_audiohost/session.js";
 import { scheduleBusSync, scheduleNodeInputSync } from "./comfy_audiohost/sidechain.js";
 import { fitNodeSize, getWidget } from "./comfy_audiohost/utils.js";
 
@@ -39,11 +39,13 @@ function registerAudioHostNode(nodeType) {
     this.addWidget("button", "Refresh Plugin List", null, () => {
       refreshPlugins(this).catch((error) => console.error("[comfy-audiohost]", error));
     });
-    this.addWidget("button", "Open Plugin Editor", null, () => {
-      openEditor(this).catch((error) => console.error("[comfy-audiohost]", error));
+    this.audiohostEditorButton = this.addWidget("button", "Open Plugin Editor", null, () => {
+      toggleEditor(this).catch((error) => console.error("[comfy-audiohost]", error));
     });
+    this.audiohostEditorOpen = false;
 
     createParamWidgets(this);
+    updateEditorButton(this);
     fitNodeSize(this);
     scheduleNodeInputSync(this);
     scheduleBusSync(this);

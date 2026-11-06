@@ -32,9 +32,10 @@ Buttons:
 
 - **Refresh Plugin List** — rescans default plugin locations (plus
   `VST_PATH`/`VST3_PATH`) and updates the dropdown.
-- **Open Plugin Editor** — opens the native editor window. While it is open,
-  state and parameter values are captured automatically every few seconds,
-  plus one final capture when the window closes.
+- **Open Plugin Editor** — opens the native editor window; the button becomes
+  **Close Plugin Editor** while it is open. Closing (button or window) captures
+  the final state automatically. While open, state and parameter values are
+  also captured every few seconds.
 
 ## State persistence
 

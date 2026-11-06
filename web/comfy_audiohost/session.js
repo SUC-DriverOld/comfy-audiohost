@@ -22,6 +22,13 @@ export function stopStatePolling(node) {
   }
 }
 
+export function updateEditorButton(node) {
+  const button = node.audiohostEditorButton;
+  if (!button) return;
+  button.label = node.audiohostEditorOpen ? "Close Plugin Editor" : "Open Plugin Editor";
+  node.setDirtyCanvas(true, true);
+}
+
 // While the editor is open, keep syncing its live state and parameter values
 // into the hidden widgets so the workflow always carries the latest settings.
 export function startStatePolling(node) {
@@ -31,7 +38,7 @@ export function startStatePolling(node) {
   }, POLL_INTERVAL_MS);
 }
 
-async function captureState(node) {
+export async function captureState(node) {
   const response = await api.fetchApi(`/comfy-audiohost/state?node_id=${node.id}`);
   if (!response.ok) throw new Error(await response.text());
   const data = await response.json();
@@ -45,6 +52,31 @@ async function captureState(node) {
   if (data.editor_open === false) {
     stopStatePolling(node);
     closeSession(node);
+    node.audiohostEditorOpen = false;
+    updateEditorButton(node);
+  }
+}
+
+// Capture the final settings, then drop the session (its worker closes the
+// editor window with it).
+export async function closeEditorSession(node) {
+  try {
+    await captureState(node);
+  } catch (error) {
+    // No live session (closed or crashed already): just drop local state.
+  }
+  stopStatePolling(node);
+  closeSession(node);
+  node.audiohostEditorOpen = false;
+  updateEditorButton(node);
+}
+
+// Button toggle: open the editor, or close it when it is already open.
+export async function toggleEditor(node) {
+  if (node.audiohostEditorOpen) {
+    await closeEditorSession(node);
+  } else {
+    await openEditor(node);
   }
 }
 
@@ -63,5 +95,7 @@ export async function openEditor(node) {
     }),
   });
   if (!response.ok) throw new Error(await response.text());
+  node.audiohostEditorOpen = true;
+  updateEditorButton(node);
   startStatePolling(node);
 }

@@ -6,7 +6,7 @@ import {
   saveAddedParams,
   syncParamPicker,
 } from "./params.js";
-import { closeSession, stopStatePolling } from "./session.js";
+import { closeSession, stopStatePolling, updateEditorButton } from "./session.js";
 import { scheduleBusSync } from "./sidechain.js";
 import { getWidget } from "./utils.js";
 
@@ -58,6 +58,8 @@ export function resetPluginDependentState(node) {
   node.audioHostLiveParams = null;
   stopStatePolling(node);
   closeSession(node);
+  node.audiohostEditorOpen = false;
+  updateEditorButton(node);
   rebuildParamWidgets(node);
   syncParamPicker(node);
   scheduleBusSync(node);

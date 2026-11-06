@@ -6,6 +6,23 @@ processed `AUDIO`. Effect processing is provided by
 [pyaudiohost](https://pypi.org/project/pyaudiohost/); effects only, no
 instruments.
 
+## How to install
+
+Clone the repository into ComfyUI's `custom_nodes` folder and install the
+requirements with the Python interpreter ComfyUI runs on, then restart
+ComfyUI:
+
+```bash
+cd /path/to/ComfyUI/custom_nodes
+git clone https://github.com/SUC-DriverOld/comfy-audiohost
+
+/path/to/ComfyUI/.venv/bin/python -m pip install -r comfy-audiohost/requirements.txt
+```
+
+On the first startup after installation, a background scan of the default
+plugin locations fills the node's plugin dropdown (click **Refresh Plugin
+List** to rescan at any time).
+
 ## Node: AudioHost Effect
 
 | Input | Purpose |
@@ -87,11 +104,3 @@ built-in mono/stereo adaptation. All inputs must share the sample rate.
   `PluginChain.render()` later.
 - Sessions live in the server process; restarting ComfyUI closes editors, but
   captured state stays in the workflow.
-
-## Install
-
-Requires `pyaudiohost` (installed automatically from `requirements.txt`):
-
-```
-<path to ComfyUI python> -m pip install pyaudiohost
-```

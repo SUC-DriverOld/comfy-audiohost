@@ -6,7 +6,6 @@ from pyaudiohost import Plugin
 
 from .comfy_audiohost.buses import probe_buses, sidechain_inputs
 from .comfy_audiohost.catalog import EMPTY_CHOICE, lookup_plugin, plugin_choices
-from .comfy_audiohost.constants import CATEGORY
 from .comfy_audiohost.services.routes import register_routes
 from .comfy_audiohost.spawn import worker_spawn
 from .comfy_audiohost.state import decode_state
@@ -82,7 +81,7 @@ class AudioHostEffect:
     RETURN_TYPES = ("AUDIO",)
     RETURN_NAMES = ("audio",)
     FUNCTION = "render"
-    CATEGORY = CATEGORY
+    CATEGORY = "audio/audiohost"
 
     def render(self, audio, plugin, plugin_state, param_values="", **sidechains):
         if plugin == EMPTY_CHOICE:

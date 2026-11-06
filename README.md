@@ -82,10 +82,11 @@ in well under a second instead of importing the whole server.
 ## Parameter controls
 
 Plugins can expose hundreds of parameters, so nothing is listed by default.
-Pick a parameter in the **parameter dropdown** (searchable via the filter box
-above it) and click **Add Parameter** to get a slider for it on the node;
-**Remove Parameter** takes the selected one off again. Only what you add is
-shown, and the node grows and shrinks with the controls.
+Pick a parameter in the **parameter dropdown** (both dropdowns support the
+frontend's built-in type-to-search) and click **Add Parameter** to get a
+slider for it on the node; **Remove Parameter** takes the selected one off
+again. Only what you add is shown, and the node grows and shrinks with the
+controls.
 
 Sliders use the library's normalized [0, 1] range; stepped parameters snap to
 their steps. Values persist in the hidden `param_values` widget, so they
@@ -95,8 +96,7 @@ settings.
 
 While an editor session is open, sliders and the plugin GUI stay in sync both
 ways: moving a slider updates the live plugin immediately, and GUI changes are
-reflected back onto the sliders by the same poll that captures the state. The
-plugin dropdown has its own filter box for searching large plugin lists.
+reflected back onto the sliders by the same poll that captures the state.
 
 ## Sidechain
 

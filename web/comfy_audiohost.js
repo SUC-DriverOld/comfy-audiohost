@@ -100,21 +100,13 @@ async function openEditor(node) {
 // Plugin list + search filter
 // ---------------------------------------------------------------------------
 
-function applyPluginFilter(node) {
+function storePluginList(node, plugins) {
   const combo = getWidget(node, "plugin");
   if (!combo) return;
-  const all = node.audioHostAllPlugins ?? [];
-  const query = String(node.audioHostPluginSearch?.value ?? "").trim().toLowerCase();
-  let values = query ? all.filter((name) => name.toLowerCase().includes(query)) : all.slice();
-  if (!values.length) values = combo.value ? [combo.value] : all;
+  let values = plugins.slice();
   if (combo.value && !values.includes(combo.value)) values = [combo.value, ...values];
   combo.options.values = values;
   node.setDirtyCanvas(true, true);
-}
-
-function storePluginList(node, plugins) {
-  node.audioHostAllPlugins = plugins;
-  applyPluginFilter(node);
 }
 
 async function refreshPlugins(node) {
@@ -254,16 +246,12 @@ function paramPickerValues(node) {
 
 const NO_PARAMS_PLACEHOLDER = "(no parameters)";
 
-function applyParamFilter(node) {
+function syncParamPicker(node) {
   const picker = node.audioHostParamPicker;
   if (!picker) return;
-  const query = String(node.audioHostParamSearch?.value ?? "").trim().toLowerCase();
-  let values = query
-    ? paramPickerValues(node).filter((label) => label.toLowerCase().includes(query))
-    : paramPickerValues(node);
-  if (!values.length) values = [NO_PARAMS_PLACEHOLDER];
-  picker.options.values = values;
-  if (!values.includes(picker.value)) picker.value = values[0];
+  const values = paramPickerValues(node);
+  picker.options.values = values.length ? values : [NO_PARAMS_PLACEHOLDER];
+  if (!picker.options.values.includes(picker.value)) picker.value = picker.options.values[0];
   node.setDirtyCanvas(true, true);
 }
 
@@ -315,7 +303,7 @@ function requestParams(node) {
       const data = await response.json();
       node.audioHostParams = data.parameters ?? [];
       node.audioHostLiveParams = null;
-      applyParamFilter(node);
+      syncParamPicker(node);
       rebuildParamWidgets(node);
     })
     .catch((error) => console.error("[comfy-audiohost]", error));
@@ -329,7 +317,7 @@ function resetPluginDependentState(node) {
   stopStatePolling(node);
   closeSession(node);
   rebuildParamWidgets(node);
-  applyParamFilter(node);
+  syncParamPicker(node);
   scheduleBusSync(node);
   requestParams(node);
 }
@@ -450,15 +438,6 @@ function registerAudioHostNode(nodeType) {
       captureState(this).catch((error) => console.error("[comfy-audiohost]", error));
     });
 
-    this.audioHostPluginSearch = this.addWidget("text", "filter_plugins", "", () => {
-      applyPluginFilter(this);
-    });
-    this.audioHostPluginSearch.serialize = false;
-
-    this.audioHostParamSearch = this.addWidget("text", "filter_params", "", () => {
-      applyParamFilter(this);
-    });
-    this.audioHostParamSearch.serialize = false;
     // litegraph throws when a combo widget is created without values.
     this.audioHostParamPicker = this.addWidget(
       "combo",

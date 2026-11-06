@@ -44,6 +44,12 @@ def open_session(node_id, label, description, state):
             _sessions[node_id] = {"label": label, "key": key, "plugin": plugin}
             if state:
                 plugin.load_state(state)
+            # Native settings live in the component, but editor edits only reach
+            # it as queued parameter changes: save_state() flushes them through
+            # a process() call, which a handle only does once prepared. Without
+            # this every capture returns the settings the handle was created
+            # with, so editor tweaks are lost on reopen and at render time.
+            plugin.prepare()
         plugin.open_editor()
         return label
 

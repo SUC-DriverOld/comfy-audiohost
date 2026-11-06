@@ -7,9 +7,9 @@ const PARAMS_WIDGET = "param_values";
 const POLL_INTERVAL_MS = 3000;
 const MAX_SIDECHAIN_SLOTS = 3;
 const NODE_WIDTH = 300;
-// Width of the inline "×" remove button drawn at the right end of each
+// Width of the inline "Delete" button drawn at the right end of each
 // parameter slider row.
-const REMOVE_STRIP = 26;
+const REMOVE_STRIP = 48;
 
 function getWidget(node, name) {
   return node.widgets?.find((widget) => widget.name === name);
@@ -185,12 +185,13 @@ function rebuildParamWidgets(node) {
     slider.name = paramWidgetName(id);
     slider.label = spec.name;
     slider.serialize = false;
-    // Narrow the slider's own drawing so the inline "×" strip stays clear.
-    slider.draw = (ctx, canvas, width, showText) =>
-      slider.drawWidget(ctx, {
-        width: Math.max(60, width - REMOVE_STRIP),
-        showText: showText !== false,
-      });
+    // Narrow the slider's own drawing so the inline "Delete" button stays
+    // clear, and mirror it into widget.width: the frontend sizes the click
+    // zones for the +/- arrows from width || node width.
+    slider.draw = (ctx, canvas, width, showText) => {
+      slider.width = Math.max(60, width - REMOVE_STRIP);
+      slider.drawWidget(ctx, { width: slider.width, showText: showText !== false });
+    };
   }
   node.audioHostRemoveHits = [];
   fitNodeSize(node);
@@ -204,26 +205,36 @@ function removeParam(node, id) {
   rebuildParamWidgets(node);
 }
 
-// Paint one small "×" at the right end of every parameter slider row and
-// record its graph-space hit rectangle on the node.
+// Paint one small rounded "Delete" button at the right end of every
+// parameter slider row and record its graph-space hit rectangle on the node.
 function drawRemoveButtons(ctx, node) {
   node.audioHostRemoveHits = [];
   if (node.flags?.collapsed) return;
   for (const widget of node.widgets ?? []) {
     const name = String(widget?.name ?? "");
     if (!name.startsWith("param:") || widget.hidden) continue;
-    const x = node.size[0] - REMOVE_STRIP + 2;
+    const x = node.size[0] - REMOVE_STRIP + 3;
     const y = widget.y + 1;
-    const width = REMOVE_STRIP - 6;
-    const height = Math.max(10, (widget.height ?? 20) - 2);
+    const width = REMOVE_STRIP - 8;
+    const height = Math.max(12, (widget.height ?? 20) - 3);
     ctx.save();
-    ctx.fillStyle = "#3a3a3a";
-    ctx.fillRect(x, y, width, height);
-    ctx.fillStyle = "#dddddd";
-    ctx.font = "11px sans-serif";
+    ctx.fillStyle = "rgba(64, 64, 70, 0.95)";
+    ctx.strokeStyle = "#808088";
+    ctx.lineWidth = 1;
+    if (typeof ctx.roundRect === "function") {
+      ctx.beginPath();
+      ctx.roundRect(x + 0.5, y + 0.5, width, height, 4);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.fillRect(x, y, width, height);
+      ctx.strokeRect(x + 0.5, y + 0.5, width, height);
+    }
+    ctx.fillStyle = "#ecEcF0";
+    ctx.font = "10px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("×", x + width / 2, y + height / 2 + 0.5);
+    ctx.fillText("Delete", x + width / 2, y + height / 2 + 0.5);
     ctx.restore();
     node.audioHostRemoveHits.push({
       id: name.slice("param:".length),

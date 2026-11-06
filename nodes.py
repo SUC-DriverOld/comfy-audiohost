@@ -67,7 +67,6 @@ class AudioHostEffect:
             "required": {
                 "audio": ("AUDIO",),
                 "plugin": (choices, {"default": choices[0]}),
-                "bypass": ("BOOLEAN", {"default": False}),
                 # Hidden by the web extension; holds the captured state blob.
                 "plugin_state": ("STRING", {"default": "", "multiline": False}),
                 # Hidden by the web extension; JSON of node-level parameter
@@ -85,7 +84,7 @@ class AudioHostEffect:
     FUNCTION = "render"
     CATEGORY = CATEGORY
 
-    def render(self, audio, plugin, bypass, plugin_state, param_values="", **sidechains):
+    def render(self, audio, plugin, plugin_state, param_values="", **sidechains):
         if plugin == EMPTY_CHOICE:
             raise ValueError("No effect plugins found; click 'Refresh Plugin List' on the node")
         description = lookup_plugin(plugin)
@@ -106,7 +105,6 @@ class AudioHostEffect:
                 handle.load_state(decode_state(plugin_state, plugin))
             if param_values:
                 apply_parameter_overrides(handle, param_values)
-            handle.bypassed = bypass
             if connected:
                 self._render_sidechain(
                     handle, description, waveform, connected, sample_rate, outputs

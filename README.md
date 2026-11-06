@@ -29,7 +29,6 @@ List** to rescan at any time).
 | --- | --- |
 | `audio` | Any ComfyUI `AUDIO` source (LoadAudio, other effects, ...) |
 | `plugin` | Dropdown of scanned effects (`Name [FORMAT]`) |
-| `bypass` | Pass the audio through unchanged |
 | `plugin_state` | Hidden widget carrying the captured native state blob |
 | `param_values` | Hidden widget carrying node-level parameter overrides (JSON) |
 | `sidechain_1..3` | Optional; shown only when the plugin exposes auxiliary input buses |
@@ -92,7 +91,7 @@ their steps. Each row carries a small inline "×" at its right end to remove
 exactly that parameter. Values persist in the hidden `param_values` widget, so
 they survive workflow save/load like everything else, and they are applied on
 top of the restored state at execution time — node controls win over saved
-plugin settings. `audio`, `bypass`, and the other declared widgets also
+plugin settings. `audio` and the other declared widgets also
 support the frontend's native right-click "Convert to input" for external
 links.
 

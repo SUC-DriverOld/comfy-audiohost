@@ -184,14 +184,12 @@ function rebuildParamWidgets(node) {
   }
   const map = addedParams(node);
   for (const [id, spec] of Object.entries(map)) {
-    const meta = (node.audioHostParams ?? []).find((param) => param.id === id);
-    const step = meta?.steps > 1 ? 1 / (meta.steps - 1) : 0.001;
     const slider = node.addWidget(
       "number",
       spec.name,
       Number(spec.value) || 0,
       (value) => onParamChanged(node, id, value),
-      { min: 0, max: 1, step }
+      { min: 0, max: 1, step: 0.001 }
     );
     slider.name = paramWidgetName(id);
     slider.label = spec.name;
@@ -244,15 +242,16 @@ function drawRemoveButtons(ctx, node) {
 }
 
 // Intercept clicks on the inline "×" buttons before litegraph hands the
-// event to the underlying slider widget.
+// event to the underlying slider widget. Bound to window capture so it runs
+// ahead of the canvas listeners no matter how the frontend exposes them.
 function handleRemoveClick(event) {
   const canvas = app.canvas;
-  if (!canvas?.convertEventToCanvasOffset || !app.graph) return;
+  if (!canvas?.convertEventToCanvasOffset || !app.graph?._nodes) return;
   const pos = canvas.convertEventToCanvasOffset({
     clientX: event.clientX,
     clientY: event.clientY,
   });
-  for (const node of app.graph._nodes ?? []) {
+  for (const node of app.graph._nodes) {
     for (const hit of node.audioHostRemoveHits ?? []) {
       const [x, y, width, height] = hit.rect;
       if (pos[0] >= x && pos[0] <= x + width && pos[1] >= y && pos[1] <= y + height) {
@@ -547,9 +546,6 @@ app.registerExtension({
     if (nodeData.name === NODE_TYPE) registerAudioHostNode(nodeType);
   },
   setup() {
-    const canvasElement = app.canvas?.canvas ?? app.canvas?.el;
-    if (canvasElement?.addEventListener) {
-      canvasElement.addEventListener("mousedown", handleRemoveClick, true);
-    }
+    window.addEventListener("mousedown", handleRemoveClick, true);
   },
 });

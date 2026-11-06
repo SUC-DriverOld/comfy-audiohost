@@ -14,7 +14,6 @@ from .comfy_audiohost.state import decode_state
 register_routes()
 
 SIDECHAIN_INPUTS = 3
-PARAM_INPUTS = 8
 
 
 def adapt_channels(data, channels):
@@ -38,23 +37,13 @@ def fit_sidechain(data, frames, channels):
     return adapted[:, :frames]
 
 
-def apply_parameter_overrides(handle, param_values, linked):
-    """Apply node-level parameter controls on top of the restored state.
-
-    Rows bound to an input slot use the linked value when connected and fall
-    back to the slider's saved value otherwise.
-    """
+def apply_parameter_overrides(handle, param_values):
+    """Apply node-level parameter controls on top of the restored state."""
     try:
         overrides = json.loads(param_values) if param_values else {}
         if not isinstance(overrides, dict):
             raise ValueError("not an object")
-        items = []
-        for pid, spec in overrides.items():
-            value = spec["value"]
-            slot = spec.get("slot")
-            if slot is not None:
-                value = linked.get(f"param_{int(slot)}", value)
-            items.append((str(pid), float(value)))
+        items = [(str(pid), float(spec["value"])) for pid, spec in overrides.items()]
     except (ValueError, TypeError, KeyError):
         raise ValueError("Parameter overrides are malformed; re-add the parameter controls") from None
     for parameter_id, value in items:
@@ -87,13 +76,7 @@ class AudioHostEffect:
             },
             # Visible count is driven by the probed bus layout; see web JS.
             "optional": {
-                **{f"sidechain_{index}": ("AUDIO",) for index in range(1, SIDECHAIN_INPUTS + 1)},
-                # Link slots for parameter controls bound with the "→ Input"
-                # button; values are normalized floats.
-                **{
-                    f"param_{index}": ("FLOAT", {"forceInput": True})
-                    for index in range(1, PARAM_INPUTS + 1)
-                },
+                f"sidechain_{index}": ("AUDIO",) for index in range(1, SIDECHAIN_INPUTS + 1)
             },
         }
 
@@ -106,16 +89,7 @@ class AudioHostEffect:
         if plugin == EMPTY_CHOICE:
             raise ValueError("No effect plugins found; click 'Refresh Plugin List' on the node")
         description = lookup_plugin(plugin)
-        connected = [
-            entry
-            for name, entry in sorted(sidechains.items())
-            if name.startswith("sidechain_") and entry is not None
-        ]
-        linked_params = {
-            name: value
-            for name, value in sidechains.items()
-            if name.startswith("param_") and value is not None
-        }
+        connected = [entry for _, entry in sorted(sidechains.items()) if entry is not None]
         sample_rate = int(audio["sample_rate"])
         waveform = audio["waveform"].to(torch.float32)
         for entry in connected:
@@ -131,7 +105,7 @@ class AudioHostEffect:
             if plugin_state:
                 handle.load_state(decode_state(plugin_state, plugin))
             if param_values:
-                apply_parameter_overrides(handle, param_values, linked_params)
+                apply_parameter_overrides(handle, param_values)
             handle.bypassed = bypass
             if connected:
                 self._render_sidechain(

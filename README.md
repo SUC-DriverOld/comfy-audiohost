@@ -89,15 +89,13 @@ exactly that row. Only what you add is shown, and the node grows and shrinks
 with the controls.
 
 Sliders use the library's normalized [0, 1] range; stepped parameters snap to
-their steps. Values persist in the hidden `param_values` widget, so they
-survive workflow save/load like everything else, and they are applied on top
-of the restored state at execution time — node controls win over saved plugin
-settings. Each row's **→ Input** button converts it to a FLOAT input slot
-(labelled with the parameter name) that accepts external links for animation
-or per-run control; **← Slider** converts it back, and a disconnected link
-falls back to the row's saved slider value. Up to 8 parameters can be linked
-at once. `audio`, `bypass`, and the other declared widgets also support the
-frontend's native right-click "Convert to input".
+their steps. Each row carries a small inline "×" at its right end to remove
+exactly that parameter. Values persist in the hidden `param_values` widget, so
+they survive workflow save/load like everything else, and they are applied on
+top of the restored state at execution time — node controls win over saved
+plugin settings. `audio`, `bypass`, and the other declared widgets also
+support the frontend's native right-click "Convert to input" for external
+links.
 
 While an editor session is open, sliders and the plugin GUI stay in sync both
 ways: moving a slider updates the live plugin immediately, and GUI changes are

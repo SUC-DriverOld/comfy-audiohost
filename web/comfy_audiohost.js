@@ -6,8 +6,10 @@ const STATE_WIDGET = "plugin_state";
 const PARAMS_WIDGET = "param_values";
 const POLL_INTERVAL_MS = 3000;
 const MAX_SIDECHAIN_SLOTS = 3;
-const PARAM_INPUT_SLOTS = 8;
 const NODE_WIDTH = 300;
+// Width of the inline "×" remove button drawn at the right end of each
+// parameter slider row.
+const REMOVE_STRIP = 26;
 
 function getWidget(node, name) {
   return node.widgets?.find((widget) => widget.name === name);
@@ -165,20 +167,14 @@ function saveAddedParams(node, map) {
 }
 
 // Rebuild the dynamic parameter rows from the param_values JSON and the
-// probed metadata. Unbound rows get a slider in native units (or normalized
-// when no range was measurable) plus "×" and "→ Input" buttons; rows bound to
-// an input slot keep only the buttons, and the slot itself carries the value.
-// None of these widgets serialize (values live in param_values), so workflow
-// round-trips stay positional-safe.
+// probed metadata. Each row is a slider whose built-in drawing is narrowed to
+// leave room for a small "×" button drawn inline at the right end (see
+// drawRemoveButtons and the canvas capture listener). Widgets never serialize
+// (values live in param_values), so workflow round-trips stay positional-safe.
 function rebuildParamWidgets(node) {
   const widgets = node.widgets ?? [];
   for (let index = widgets.length - 1; index >= 0; index -= 1) {
-    const name = String(widgets[index]?.name ?? "");
-    if (
-      name.startsWith("param:") ||
-      name.startsWith("param-remove:") ||
-      name.startsWith("param-link:")
-    ) {
+    if (String(widgets[index]?.name ?? "").startsWith("param:")) {
       if (typeof node.removeWidget === "function") {
         node.removeWidget(widgets[index]);
       } else {
@@ -188,29 +184,26 @@ function rebuildParamWidgets(node) {
   }
   const map = addedParams(node);
   for (const [id, spec] of Object.entries(map)) {
-    if (spec.slot == null) {
-      const meta = (node.audioHostParams ?? []).find((param) => param.id === id);
-      const step = meta?.steps > 1 ? 1 / (meta.steps - 1) : 0.001;
-      const widget = node.addWidget(
-        "number",
-        spec.name,
-        Number(spec.value) || 0,
-        (value) => onParamChanged(node, id, value),
-        { min: 0, max: 1, step }
-      );
-      widget.name = paramWidgetName(id);
-      widget.label = spec.name;
-      widget.serialize = false;
-    }
-    const remove = node.addWidget("button", "×", null, () => removeParam(node, id));
-    remove.name = `param-remove:${id}`;
-    remove.label = "×";
-    remove.serialize = false;
-    const toggle = node.addWidget("button", "→ Input", null, () => toggleParamInput(node, id));
-    toggle.name = `param-link:${id}`;
-    toggle.label = spec.slot == null ? "→ Input" : "← Slider";
-    toggle.serialize = false;
+    const meta = (node.audioHostParams ?? []).find((param) => param.id === id);
+    const step = meta?.steps > 1 ? 1 / (meta.steps - 1) : 0.001;
+    const slider = node.addWidget(
+      "number",
+      spec.name,
+      Number(spec.value) || 0,
+      (value) => onParamChanged(node, id, value),
+      { min: 0, max: 1, step }
+    );
+    slider.name = paramWidgetName(id);
+    slider.label = spec.name;
+    slider.serialize = false;
+    // Narrow the slider's own drawing so the inline "×" strip stays clear.
+    slider.draw = (ctx, canvas, width, showText) =>
+      slider.drawWidget(ctx, {
+        width: Math.max(60, width - REMOVE_STRIP),
+        showText: showText !== false,
+      });
   }
+  node.audioHostRemoveHits = [];
   fitNodeSize(node);
 }
 
@@ -220,34 +213,56 @@ function removeParam(node, id) {
   delete map[id];
   saveAddedParams(node, map);
   rebuildParamWidgets(node);
-  scheduleNodeInputSync(node);
 }
 
-// Bind a parameter row to one of the node's FLOAT input slots (or unbind it).
-// The slot name/number mapping is recorded in param_values, so execution and
-// workflow round-trips know exactly which linked value belongs to which
-// parameter.
-function toggleParamInput(node, id) {
-  const map = addedParams(node);
-  const spec = map[id];
-  if (!spec) return;
-  if (spec.slot == null) {
-    const used = new Set(
-      Object.values(map).map((entry) => entry.slot).filter((slot) => slot != null)
-    );
-    let slot = 1;
-    while (slot <= PARAM_INPUT_SLOTS && used.has(slot)) slot += 1;
-    if (slot > PARAM_INPUT_SLOTS) {
-      console.warn(`[comfy-audiohost] at most ${PARAM_INPUT_SLOTS} linked parameters per node`);
-      return;
-    }
-    spec.slot = slot;
-  } else {
-    delete spec.slot;
+// Paint one small "×" at the right end of every parameter slider row and
+// record its graph-space hit rectangle on the node.
+function drawRemoveButtons(ctx, node) {
+  node.audioHostRemoveHits = [];
+  if (node.flags?.collapsed) return;
+  for (const widget of node.widgets ?? []) {
+    const name = String(widget?.name ?? "");
+    if (!name.startsWith("param:") || widget.hidden) continue;
+    const x = node.size[0] - REMOVE_STRIP + 2;
+    const y = widget.y + 1;
+    const width = REMOVE_STRIP - 6;
+    const height = Math.max(10, (widget.height ?? 20) - 2);
+    ctx.save();
+    ctx.fillStyle = "#3a3a3a";
+    ctx.fillRect(x, y, width, height);
+    ctx.fillStyle = "#dddddd";
+    ctx.font = "11px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("×", x + width / 2, y + height / 2 + 0.5);
+    ctx.restore();
+    node.audioHostRemoveHits.push({
+      id: name.slice("param:".length),
+      rect: [node.pos[0] + x, node.pos[1] + y, width, height],
+    });
   }
-  saveAddedParams(node, map);
-  rebuildParamWidgets(node);
-  scheduleNodeInputSync(node);
+}
+
+// Intercept clicks on the inline "×" buttons before litegraph hands the
+// event to the underlying slider widget.
+function handleRemoveClick(event) {
+  const canvas = app.canvas;
+  if (!canvas?.convertEventToCanvasOffset || !app.graph) return;
+  const pos = canvas.convertEventToCanvasOffset({
+    clientX: event.clientX,
+    clientY: event.clientY,
+  });
+  for (const node of app.graph._nodes ?? []) {
+    for (const hit of node.audioHostRemoveHits ?? []) {
+      const [x, y, width, height] = hit.rect;
+      if (pos[0] >= x && pos[0] <= x + width && pos[1] >= y && pos[1] <= y + height) {
+        event.stopPropagation();
+        event.preventDefault();
+        removeParam(node, hit.id);
+        return;
+      }
+    }
+  }
 }
 
 function onParamChanged(node, id, value) {
@@ -366,7 +381,7 @@ function resetPluginDependentState(node) {
 }
 
 // ---------------------------------------------------------------------------
-// Input slots: main audio + sidechains + linked parameter slots
+// Input slots: main audio + sidechains
 // ---------------------------------------------------------------------------
 
 function disconnectInput(node, index) {
@@ -383,31 +398,15 @@ function sidechainCount(node) {
   return inputs.filter((bus) => !bus.main && bus.channels > 0).length;
 }
 
-function boundParamSlots(node) {
-  const entries = [];
-  for (const spec of Object.values(addedParams(node))) {
-    if (spec.slot != null) {
-      entries.push({ slot: spec.slot, name: `param_${spec.slot}`, label: spec.name });
-    }
-  }
-  return entries.sort((a, b) => a.slot - b.slot);
-}
-
-// Manage the node's input slots to exactly ["audio", sidechain_1..N,
-// param_X...] where N is the probed auxiliary bus count and param_X are the
-// parameter rows bound with "→ Input". Follows the comfy-mss ensemble node's
-// deferred-sync pattern so slots are never touched while litegraph is still
-// restoring a loaded workflow's links.
+// Manage the node's input slots to exactly ["audio", sidechain_1..N] where N
+// is the probed auxiliary input bus count. Follows the comfy-mss ensemble
+// node's deferred-sync pattern so slots are never touched while litegraph is
+// still restoring a loaded workflow's links.
 function syncNodeInputs(node) {
   const count = Math.min(sidechainCount(node), MAX_SIDECHAIN_SLOTS);
-  const bound = boundParamSlots(node);
-  const types = { audio: "AUDIO" };
-  for (let index = 1; index <= count; index += 1) types[`sidechain_${index}`] = "AUDIO";
-  for (const entry of bound) types[entry.name] = "FLOAT";
   const desired = [
     "audio",
     ...Array.from({ length: count }, (_value, index) => `sidechain_${index + 1}`),
-    ...bound.map((entry) => entry.name),
   ];
 
   node.inputs ||= [];
@@ -430,13 +429,11 @@ function syncNodeInputs(node) {
         const [existing] = node.inputs.splice(existingIndex, 1);
         node.inputs.splice(index, 0, existing);
       } else {
-        node.addInput(name, types[name] ?? "*");
+        node.addInput(name, "AUDIO");
         const [created] = node.inputs.splice(node.inputs.length - 1, 1);
         node.inputs.splice(index, 0, created);
       }
     }
-    const binding = bound.find((entry) => entry.name === name);
-    if (binding) node.inputs[index].label = binding.label;
   }
   node.inputs.length = desired.length;
   fitNodeSize(node);
@@ -535,11 +532,24 @@ function registerAudioHostNode(nodeType) {
     closeSession(this);
     return onRemoved?.apply(this, arguments);
   };
+
+  const onDrawForeground = nodeType.prototype.onDrawForeground;
+  nodeType.prototype.onDrawForeground = function (ctx) {
+    const result = onDrawForeground?.apply(this, arguments);
+    drawRemoveButtons(ctx, this);
+    return result;
+  };
 }
 
 app.registerExtension({
   name: "comfy-audiohost",
   beforeRegisterNodeDef(nodeType, nodeData) {
     if (nodeData.name === NODE_TYPE) registerAudioHostNode(nodeType);
+  },
+  setup() {
+    const canvasElement = app.canvas?.canvas ?? app.canvas?.el;
+    if (canvasElement?.addEventListener) {
+      canvasElement.addEventListener("mousedown", handleRemoveClick, true);
+    }
   },
 });

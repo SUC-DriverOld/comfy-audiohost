@@ -175,13 +175,14 @@ function saveAddedParams(node, map) {
 // probed metadata. Sliders never serialize (values live in param_values), so
 // workflow round-trips stay positional-safe.
 function rebuildParamWidgets(node) {
-  for (let index = node.widgets?.length - 1 ?? 0; index >= 0; index -= 1) {
-    const widget = node.widgets[index];
+  const widgets = node.widgets ?? [];
+  for (let index = widgets.length - 1; index >= 0; index -= 1) {
+    const widget = widgets[index];
     if (String(widget?.name ?? "").startsWith("param:")) {
       if (typeof node.removeWidget === "function") {
         node.removeWidget(widget);
       } else {
-        node.widgets.splice(index, 1);
+        widgets.splice(index, 1);
       }
     }
   }
@@ -189,15 +190,16 @@ function rebuildParamWidgets(node) {
   for (const [id, spec] of Object.entries(map)) {
     const meta = (node.audioHostParams ?? []).find((param) => param.id === id);
     const step = meta?.steps > 1 ? 1 / (meta.steps - 1) : 0.001;
-    const widget = node.addWidget("number", spec.name, Number(spec.value) || 0, null, {
-      min: 0,
-      max: 1,
-      step,
-    });
+    const widget = node.addWidget(
+      "number",
+      spec.name,
+      Number(spec.value) || 0,
+      (value) => onParamChanged(node, id, value),
+      { min: 0, max: 1, step }
+    );
     widget.name = paramWidgetName(id);
     widget.label = spec.name;
     widget.serialize = false;
-    widget.callback = (value) => onParamChanged(node, id, value);
   }
   fitNodeSize(node);
 }
@@ -250,6 +252,8 @@ function paramPickerValues(node) {
   return values;
 }
 
+const NO_PARAMS_PLACEHOLDER = "(no parameters)";
+
 function applyParamFilter(node) {
   const picker = node.audioHostParamPicker;
   if (!picker) return;
@@ -257,9 +261,9 @@ function applyParamFilter(node) {
   let values = query
     ? paramPickerValues(node).filter((label) => label.toLowerCase().includes(query))
     : paramPickerValues(node);
-  if (!values.length) values = paramPickerValues(node);
+  if (!values.length) values = [NO_PARAMS_PLACEHOLDER];
   picker.options.values = values;
-  if (!values.includes(picker.value)) picker.value = values[0] ?? "";
+  if (!values.includes(picker.value)) picker.value = values[0];
   node.setDirtyCanvas(true, true);
 }
 
@@ -455,7 +459,14 @@ function registerAudioHostNode(nodeType) {
       applyParamFilter(this);
     });
     this.audioHostParamSearch.serialize = false;
-    this.audioHostParamPicker = this.addWidget("combo", "param_picker", "", () => {});
+    // litegraph throws when a combo widget is created without values.
+    this.audioHostParamPicker = this.addWidget(
+      "combo",
+      "param_picker",
+      NO_PARAMS_PLACEHOLDER,
+      () => {},
+      { values: [NO_PARAMS_PLACEHOLDER] }
+    );
     this.audioHostParamPicker.serialize = false;
     this.addWidget("button", "Add Parameter", null, () => addSelectedParam(this));
     this.addWidget("button", "Remove Parameter", null, () => removeSelectedParam(this));

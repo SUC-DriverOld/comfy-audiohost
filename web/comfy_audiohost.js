@@ -163,16 +163,17 @@ function saveAddedParams(node, map) {
   if (widget) widget.value = JSON.stringify(map);
 }
 
-// Rebuild the dynamic slider widgets from the param_values JSON and the
-// probed metadata. Sliders never serialize (values live in param_values), so
-// workflow round-trips stay positional-safe.
+// Rebuild the dynamic slider rows from the param_values JSON and the probed
+// metadata. Each parameter gets its own slider plus a "×" button that removes
+// exactly that row; none of these widgets serialize (values live in
+// param_values), so workflow round-trips stay positional-safe.
 function rebuildParamWidgets(node) {
   const widgets = node.widgets ?? [];
   for (let index = widgets.length - 1; index >= 0; index -= 1) {
-    const widget = widgets[index];
-    if (String(widget?.name ?? "").startsWith("param:")) {
+    const name = String(widgets[index]?.name ?? "");
+    if (name.startsWith("param:") || name.startsWith("param-remove:")) {
       if (typeof node.removeWidget === "function") {
-        node.removeWidget(widget);
+        node.removeWidget(widgets[index]);
       } else {
         widgets.splice(index, 1);
       }
@@ -192,8 +193,20 @@ function rebuildParamWidgets(node) {
     widget.name = paramWidgetName(id);
     widget.label = spec.name;
     widget.serialize = false;
+    const remove = node.addWidget("button", "×", null, () => removeParam(node, id));
+    remove.name = `param-remove:${id}`;
+    remove.label = "×";
+    remove.serialize = false;
   }
   fitNodeSize(node);
+}
+
+function removeParam(node, id) {
+  const map = addedParams(node);
+  if (!map[id]) return;
+  delete map[id];
+  saveAddedParams(node, map);
+  rebuildParamWidgets(node);
 }
 
 function onParamChanged(node, id, value) {
@@ -276,17 +289,6 @@ function addSelectedParam(node) {
   map[meta.id] = { name: meta.name, value: live ?? meta.default ?? 0.5 };
   saveAddedParams(node, map);
   rebuildParamWidgets(node);
-}
-
-function removeSelectedParam(node) {
-  const meta = selectedParamMeta(node);
-  if (!meta) return;
-  const map = addedParams(node);
-  if (map[meta.id]) {
-    delete map[meta.id];
-    saveAddedParams(node, map);
-    rebuildParamWidgets(node);
-  }
 }
 
 function requestParams(node) {
@@ -448,7 +450,6 @@ function registerAudioHostNode(nodeType) {
     );
     this.audioHostParamPicker.serialize = false;
     this.addWidget("button", "Add Parameter", null, () => addSelectedParam(this));
-    this.addWidget("button", "Remove Parameter", null, () => removeSelectedParam(this));
 
     updateCaptureLabel(this);
     fitNodeSize(this);

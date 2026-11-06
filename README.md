@@ -84,9 +84,9 @@ in well under a second instead of importing the whole server.
 Plugins can expose hundreds of parameters, so nothing is listed by default.
 Pick a parameter in the **parameter dropdown** (both dropdowns support the
 frontend's built-in type-to-search) and click **Add Parameter** to get a
-slider for it on the node; **Remove Parameter** takes the selected one off
-again. Only what you add is shown, and the node grows and shrinks with the
-controls.
+slider for it on the node; each slider has its own **×** button to remove
+exactly that row. Only what you add is shown, and the node grows and shrinks
+with the controls.
 
 Sliders use the library's normalized [0, 1] range; stepped parameters snap to
 their steps. Values persist in the hidden `param_values` widget, so they

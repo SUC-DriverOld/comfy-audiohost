@@ -49,13 +49,27 @@ def open_session(node_id, label, description, state):
 
 
 def capture_state(node_id):
-    """Return (catalog label, native state blob, editor_open) or None without a session."""
+    """Return (label, blob, editor_open, {parameter id: value}) or None."""
     with _lock:
         session = _sessions.get(node_id)
         if session is None:
             return None
         plugin = session["plugin"]
-        return session["label"], plugin.save_state(), plugin.editor_is_open
+        values = {str(param["id"]): param["value"] for param in plugin.parameters()}
+        return session["label"], plugin.save_state(), plugin.editor_is_open, values
+
+
+def set_parameter(node_id, parameter_id, value):
+    """Apply one normalized parameter override to the node's live editor session.
+
+    Raises KeyError when the node has no session; the worker's own validation
+    (ValueError/AudioHostError) propagates for bad ids and values.
+    """
+    with _lock:
+        session = _sessions.get(node_id)
+        if session is None:
+            raise KeyError(node_id)
+        session["plugin"].set_parameter(parameter_id, value)
 
 
 def close_session(node_id):

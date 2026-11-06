@@ -3,18 +3,10 @@ import { api } from "../../scripts/api.js";
 
 const NODE_TYPE = "audiohost_effect";
 const STATE_WIDGET = "plugin_state";
+const PARAMS_WIDGET = "param_values";
 const POLL_INTERVAL_MS = 3000;
 const MAX_SIDECHAIN_SLOTS = 3;
 const NODE_WIDTH = 300;
-
-// Recompute the node's natural height (slots + visible widgets) while keeping
-// a stable width, so the node grows with added sidechain slots and shrinks
-// back when they are removed.
-function fitNodeSize(node) {
-  node.setSize(node.computeSize());
-  node.size[0] = NODE_WIDTH;
-  node.setDirtyCanvas(true, true);
-}
 
 function getWidget(node, name) {
   return node.widgets?.find((widget) => widget.name === name);
@@ -25,36 +17,22 @@ function selectedPlugin(node) {
   return value.startsWith("(") ? null : value;
 }
 
-function stateSizeLabel(node) {
-  const value = String(getWidget(node, STATE_WIDGET)?.value ?? "");
-  if (!value) return null;
-  return `${Math.max(1, Math.round((value.length * 0.75) / 1024))} KB`;
+// Recompute the node's natural height (slots + visible widgets) while keeping
+// a stable width, so the node grows with added slots/controls and shrinks
+// back when they are removed.
+function fitNodeSize(node) {
+  node.setSize(node.computeSize());
+  node.size[0] = NODE_WIDTH;
+  node.setDirtyCanvas(true, true);
 }
 
 function updateCaptureLabel(node) {
   const button = node.audiohostCaptureButton;
   if (!button) return;
-  const size = stateSizeLabel(node);
+  const value = String(getWidget(node, STATE_WIDGET)?.value ?? "");
+  const size = value ? `${Math.max(1, Math.round((value.length * 0.75) / 1024))} KB` : null;
   button.label = size ? `Capture Plugin State (saved: ${size})` : "Capture Plugin State";
   node.setDirtyCanvas(true, true);
-}
-
-async function captureState(node) {
-  const response = await api.fetchApi(`/comfy-audiohost/state?node_id=${node.id}`);
-  if (!response.ok) throw new Error(await response.text());
-  const data = await response.json();
-  const widget = getWidget(node, STATE_WIDGET);
-  if (widget && widget.value !== data.state) {
-    widget.value = data.state;
-    updateCaptureLabel(node);
-  }
-  // The editor window was closed (by the user or the plugin): the final state
-  // is in hand, so end the poll loop and release the server-side worker.
-  if (data.editor_open === false) {
-    stopStatePolling(node);
-    closeSession(node);
-  }
-  return data;
 }
 
 function closeSession(node) {
@@ -73,9 +51,8 @@ function stopStatePolling(node) {
   }
 }
 
-// While the editor is open, keep syncing its live state into the hidden
-// widget so the workflow always carries the latest settings without making
-// the user remember to click capture.
+// While the editor is open, keep syncing its live state and parameter values
+// into the hidden widgets so the workflow always carries the latest settings.
 function startStatePolling(node) {
   stopStatePolling(node);
   node.audiohostPollTimer = setInterval(() => {
@@ -83,24 +60,21 @@ function startStatePolling(node) {
   }, POLL_INTERVAL_MS);
 }
 
-async function refreshPlugins(node) {
-  const widget = getWidget(node, "plugin");
-  if (!widget) return;
-  const response = await api.fetchApi("/comfy-audiohost/scan", { method: "POST" });
+async function captureState(node) {
+  const response = await api.fetchApi(`/comfy-audiohost/state?node_id=${node.id}`);
   if (!response.ok) throw new Error(await response.text());
   const data = await response.json();
-  const plugins = data.plugins ?? [];
-  const previous = widget.value;
-  widget.options.values = plugins;
-  if (!plugins.includes(widget.value)) widget.value = plugins[0] ?? "";
-  if (Object.keys(data.errors ?? {}).length) {
-    console.warn("[comfy-audiohost] scan skipped some plugins:", data.errors);
+  const widget = getWidget(node, STATE_WIDGET);
+  if (widget && widget.value !== data.state) {
+    widget.value = data.state;
+    updateCaptureLabel(node);
   }
-  node.setDirtyCanvas(true, true);
-  if (widget.value !== previous) {
+  applyLiveParameters(node, data.parameters);
+  // The editor window was closed (by the user or the plugin): the final state
+  // is in hand, so end the poll loop and release the server-side worker.
+  if (data.editor_open === false) {
     stopStatePolling(node);
     closeSession(node);
-    scheduleBusSync(node);
   }
 }
 
@@ -121,6 +95,244 @@ async function openEditor(node) {
   if (!response.ok) throw new Error(await response.text());
   startStatePolling(node);
 }
+
+// ---------------------------------------------------------------------------
+// Plugin list + search filter
+// ---------------------------------------------------------------------------
+
+function applyPluginFilter(node) {
+  const combo = getWidget(node, "plugin");
+  if (!combo) return;
+  const all = node.audioHostAllPlugins ?? [];
+  const query = String(node.audioHostPluginSearch?.value ?? "").trim().toLowerCase();
+  let values = query ? all.filter((name) => name.toLowerCase().includes(query)) : all.slice();
+  if (!values.length) values = combo.value ? [combo.value] : all;
+  if (combo.value && !values.includes(combo.value)) values = [combo.value, ...values];
+  combo.options.values = values;
+  node.setDirtyCanvas(true, true);
+}
+
+function storePluginList(node, plugins) {
+  node.audioHostAllPlugins = plugins;
+  applyPluginFilter(node);
+}
+
+async function refreshPlugins(node) {
+  const widget = getWidget(node, "plugin");
+  if (!widget) return;
+  const response = await api.fetchApi("/comfy-audiohost/scan", { method: "POST" });
+  if (!response.ok) throw new Error(await response.text());
+  const data = await response.json();
+  const plugins = data.plugins ?? [];
+  const previous = widget.value;
+  storePluginList(node, plugins);
+  if (!plugins.includes(widget.value)) widget.value = plugins[0] ?? "";
+  if (Object.keys(data.errors ?? {}).length) {
+    console.warn("[comfy-audiohost] scan skipped some plugins:", data.errors);
+  }
+  node.setDirtyCanvas(true, true);
+  if (widget.value !== previous) resetPluginDependentState(node);
+}
+
+function syncPluginChoices(node) {
+  api.fetchApi("/comfy-audiohost/plugins").then(async (response) => {
+    if (!response.ok) return;
+    const data = await response.json();
+    if (!Array.isArray(data.plugins) || !data.plugins.length) return;
+    const widget = getWidget(node, "plugin");
+    if (!widget) return;
+    const previous = widget.value;
+    storePluginList(node, data.plugins);
+    if (!data.plugins.includes(widget.value)) widget.value = data.plugins[0];
+    node.setDirtyCanvas(true, true);
+    if (widget.value !== previous) resetPluginDependentState(node);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Parameter controls (picker + search + dynamic sliders)
+// ---------------------------------------------------------------------------
+
+function paramWidgetName(id) {
+  return `param:${id}`;
+}
+
+function addedParams(node) {
+  try {
+    const parsed = JSON.parse(String(getWidget(node, PARAMS_WIDGET)?.value || "{}"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function saveAddedParams(node, map) {
+  const widget = getWidget(node, PARAMS_WIDGET);
+  if (widget) widget.value = JSON.stringify(map);
+}
+
+// Rebuild the dynamic slider widgets from the param_values JSON and the
+// probed metadata. Sliders never serialize (values live in param_values), so
+// workflow round-trips stay positional-safe.
+function rebuildParamWidgets(node) {
+  for (let index = node.widgets?.length - 1 ?? 0; index >= 0; index -= 1) {
+    const widget = node.widgets[index];
+    if (String(widget?.name ?? "").startsWith("param:")) {
+      if (typeof node.removeWidget === "function") {
+        node.removeWidget(widget);
+      } else {
+        node.widgets.splice(index, 1);
+      }
+    }
+  }
+  const map = addedParams(node);
+  for (const [id, spec] of Object.entries(map)) {
+    const meta = (node.audioHostParams ?? []).find((param) => param.id === id);
+    const step = meta?.steps > 1 ? 1 / (meta.steps - 1) : 0.001;
+    const widget = node.addWidget("number", spec.name, Number(spec.value) || 0, null, {
+      min: 0,
+      max: 1,
+      step,
+    });
+    widget.name = paramWidgetName(id);
+    widget.label = spec.name;
+    widget.serialize = false;
+    widget.callback = (value) => onParamChanged(node, id, value);
+  }
+  fitNodeSize(node);
+}
+
+function onParamChanged(node, id, value) {
+  const map = addedParams(node);
+  if (!map[id]) return;
+  map[id].value = value;
+  saveAddedParams(node, map);
+  // Mirror the change into the live editor session, if one exists; without a
+  // session the override is still applied at execution time.
+  if (node.id != null) {
+    api.fetchApi("/comfy-audiohost/set-parameter", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ node_id: String(node.id), parameter_id: String(id), value }),
+    }).catch(() => {});
+  }
+}
+
+// GUI -> sliders: silently adopt the live session's parameter values so both
+// sides stay in sync without triggering the change callbacks.
+function applyLiveParameters(node, values) {
+  if (!values || typeof values !== "object") return;
+  node.audioHostLiveParams = values;
+  const map = addedParams(node);
+  let changed = false;
+  for (const [id, value] of Object.entries(values)) {
+    if (!(id in map)) continue;
+    if (map[id].value !== value) {
+      map[id].value = value;
+      changed = true;
+    }
+    const widget = getWidget(node, paramWidgetName(id));
+    if (widget && widget.value !== value) widget.value = value;
+  }
+  if (changed) saveAddedParams(node, map);
+}
+
+function paramPickerValues(node) {
+  const seen = new Set();
+  const values = [];
+  for (const param of node.audioHostParams ?? []) {
+    let label = param.name;
+    if (seen.has(label)) label = `${param.name} (${param.id})`;
+    seen.add(label);
+    param.pickerLabel = label;
+    values.push(label);
+  }
+  return values;
+}
+
+function applyParamFilter(node) {
+  const picker = node.audioHostParamPicker;
+  if (!picker) return;
+  const query = String(node.audioHostParamSearch?.value ?? "").trim().toLowerCase();
+  let values = query
+    ? paramPickerValues(node).filter((label) => label.toLowerCase().includes(query))
+    : paramPickerValues(node);
+  if (!values.length) values = paramPickerValues(node);
+  picker.options.values = values;
+  if (!values.includes(picker.value)) picker.value = values[0] ?? "";
+  node.setDirtyCanvas(true, true);
+}
+
+function selectedParamMeta(node) {
+  const picker = node.audioHostParamPicker;
+  if (!picker?.value) return null;
+  return (node.audioHostParams ?? []).find((param) => param.pickerLabel === picker.value) ?? null;
+}
+
+function addSelectedParam(node) {
+  const meta = selectedParamMeta(node);
+  if (!meta) {
+    console.warn("[comfy-audiohost] no parameter selected");
+    return;
+  }
+  const map = addedParams(node);
+  if (map[meta.id]) {
+    console.warn(`[comfy-audiohost] parameter ${meta.name} is already on the node`);
+    return;
+  }
+  const live = node.audioHostLiveParams?.[meta.id];
+  map[meta.id] = { name: meta.name, value: live ?? meta.default ?? 0.5 };
+  saveAddedParams(node, map);
+  rebuildParamWidgets(node);
+}
+
+function removeSelectedParam(node) {
+  const meta = selectedParamMeta(node);
+  if (!meta) return;
+  const map = addedParams(node);
+  if (map[meta.id]) {
+    delete map[meta.id];
+    saveAddedParams(node, map);
+    rebuildParamWidgets(node);
+  }
+}
+
+function requestParams(node) {
+  const plugin = selectedPlugin(node);
+  if (!plugin) return Promise.resolve();
+  return api
+    .fetchApi("/comfy-audiohost/parameters", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plugin }),
+    })
+    .then(async (response) => {
+      if (!response.ok) throw new Error(await response.text());
+      const data = await response.json();
+      node.audioHostParams = data.parameters ?? [];
+      node.audioHostLiveParams = null;
+      applyParamFilter(node);
+      rebuildParamWidgets(node);
+    })
+    .catch((error) => console.error("[comfy-audiohost]", error));
+}
+
+// Switching plugins invalidates everything derived from the old one.
+function resetPluginDependentState(node) {
+  saveAddedParams(node, {});
+  node.audioHostParams = [];
+  node.audioHostLiveParams = null;
+  stopStatePolling(node);
+  closeSession(node);
+  rebuildParamWidgets(node);
+  applyParamFilter(node);
+  scheduleBusSync(node);
+  requestParams(node);
+}
+
+// ---------------------------------------------------------------------------
+// Sidechain slots
+// ---------------------------------------------------------------------------
 
 function disconnectInput(node, index) {
   try {
@@ -182,8 +394,6 @@ function scheduleSidechainSync(node) {
   setTimeout(() => syncSidechainInputs(node), 250);
 }
 
-// Ask the backend for the selected plugin's bus layout (cached server-side)
-// and show one sidechain slot per auxiliary input bus it exposes.
 async function requestBuses(node) {
   const plugin = selectedPlugin(node);
   if (!plugin) return;
@@ -202,39 +412,26 @@ function scheduleBusSync(node) {
   requestBuses(node).catch((error) => console.error("[comfy-audiohost]", error));
 }
 
-function syncPluginChoices(node) {
-  api.fetchApi("/comfy-audiohost/plugins").then(async (response) => {
-    if (!response.ok) return;
-    const data = await response.json();
-    const widget = getWidget(node, "plugin");
-    if (!widget || !Array.isArray(data.plugins) || !data.plugins.length) return;
-    widget.options.values = data.plugins;
-    if (!data.plugins.includes(widget.value)) {
-      widget.value = data.plugins[0];
-      scheduleBusSync(node);
-    }
-    node.setDirtyCanvas(true, true);
-  });
-}
+// ---------------------------------------------------------------------------
+// Node registration
+// ---------------------------------------------------------------------------
 
 function registerAudioHostNode(nodeType) {
   const onNodeCreated = nodeType.prototype.onNodeCreated;
   nodeType.prototype.onNodeCreated = function () {
     const result = onNodeCreated?.apply(this, arguments);
-    const stateWidget = getWidget(this, STATE_WIDGET);
-    if (stateWidget) stateWidget.hidden = true;
+    for (const name of [STATE_WIDGET, PARAMS_WIDGET]) {
+      const widget = getWidget(this, name);
+      if (widget) widget.hidden = true;
+    }
 
     const pluginWidget = getWidget(this, "plugin");
     if (pluginWidget) {
       const callback = pluginWidget.callback;
       pluginWidget.callback = (value, canvas, node, pos, event) => {
         const callbackResult = callback?.call(pluginWidget, value, canvas, node, pos, event);
-        // The old plugin's editor session (its worker process and window)
-        // must not survive a selection change.
-        stopStatePolling(this);
-        closeSession(this);
+        resetPluginDependentState(this);
         scheduleSidechainSync(this);
-        scheduleBusSync(this);
         return callbackResult;
       };
     }
@@ -248,10 +445,26 @@ function registerAudioHostNode(nodeType) {
     this.audiohostCaptureButton = this.addWidget("button", "Capture Plugin State", null, () => {
       captureState(this).catch((error) => console.error("[comfy-audiohost]", error));
     });
+
+    this.audioHostPluginSearch = this.addWidget("text", "filter_plugins", "", () => {
+      applyPluginFilter(this);
+    });
+    this.audioHostPluginSearch.serialize = false;
+
+    this.audioHostParamSearch = this.addWidget("text", "filter_params", "", () => {
+      applyParamFilter(this);
+    });
+    this.audioHostParamSearch.serialize = false;
+    this.audioHostParamPicker = this.addWidget("combo", "param_picker", "", () => {});
+    this.audioHostParamPicker.serialize = false;
+    this.addWidget("button", "Add Parameter", null, () => addSelectedParam(this));
+    this.addWidget("button", "Remove Parameter", null, () => removeSelectedParam(this));
+
     updateCaptureLabel(this);
     fitNodeSize(this);
     scheduleSidechainSync(this);
     syncPluginChoices(this);
+    requestParams(this);
     return result;
   };
 
@@ -262,6 +475,7 @@ function registerAudioHostNode(nodeType) {
     fitNodeSize(this);
     scheduleSidechainSync(this);
     scheduleBusSync(this);
+    requestParams(this);
     return result;
   };
 

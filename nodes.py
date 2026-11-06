@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import torch
 from pyaudiohost import Plugin
@@ -35,6 +37,19 @@ def fit_sidechain(data, frames, channels):
     return adapted[:, :frames]
 
 
+def apply_parameter_overrides(handle, param_values):
+    """Apply node-level parameter controls on top of the restored state."""
+    try:
+        overrides = json.loads(param_values)
+        if not isinstance(overrides, dict):
+            raise ValueError("not an object")
+        items = [(str(pid), float(spec["value"])) for pid, spec in overrides.items()]
+    except (ValueError, TypeError, KeyError):
+        raise ValueError("Parameter overrides are malformed; re-add the parameter controls") from None
+    for parameter_id, value in items:
+        handle.set_parameter(parameter_id, value)
+
+
 class AudioHostEffect:
     """Process audio offline through one hosted VST/VST3/AU effect.
 
@@ -55,6 +70,9 @@ class AudioHostEffect:
                 "bypass": ("BOOLEAN", {"default": False}),
                 # Hidden by the web extension; holds the captured state blob.
                 "plugin_state": ("STRING", {"default": "", "multiline": False}),
+                # Hidden by the web extension; JSON of node-level parameter
+                # overrides: {parameter id: {name, value}} in normalized [0, 1].
+                "param_values": ("STRING", {"default": "", "multiline": False}),
             },
             # Visible count is driven by the probed bus layout; see web JS.
             "optional": {
@@ -67,7 +85,7 @@ class AudioHostEffect:
     FUNCTION = "render"
     CATEGORY = CATEGORY
 
-    def render(self, audio, plugin, bypass, plugin_state, **sidechains):
+    def render(self, audio, plugin, bypass, plugin_state, param_values="", **sidechains):
         if plugin == EMPTY_CHOICE:
             raise ValueError("No effect plugins found; click 'Refresh Plugin List' on the node")
         description = lookup_plugin(plugin)
@@ -86,6 +104,8 @@ class AudioHostEffect:
                 handle = Plugin(description)
             if plugin_state:
                 handle.load_state(decode_state(plugin_state, plugin))
+            if param_values:
+                apply_parameter_overrides(handle, param_values)
             handle.bypassed = bypass
             if connected:
                 self._render_sidechain(

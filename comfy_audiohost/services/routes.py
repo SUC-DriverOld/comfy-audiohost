@@ -1,14 +1,17 @@
 import asyncio
 
 from aiohttp import web
+from pyaudiohost.errors import AudioHostError
 from server import PromptServer
 
 from ..buses import probe_buses
 from ..catalog import lookup_plugin, plugin_choices, run_scan, scan_in_background_if_missing
+from ..params import probe_parameters
 from ..sessions import (
     capture_state,
     close_session,
     open_session,
+    set_parameter,
     start_reaper,
 )
 from ..state import StateMismatch, decode_state, encode_state
@@ -61,8 +64,48 @@ def register_routes():
         captured = await asyncio.to_thread(capture_state, request.query.get("node_id", ""))
         if captured is None:
             return web.json_response({"error": "no editor session for this node"}, status=404)
-        label, blob, editor_open = captured
-        return web.json_response({"state": encode_state(label, blob), "editor_open": editor_open})
+        label, blob, editor_open, values = captured
+        return web.json_response(
+            {
+                "state": encode_state(label, blob),
+                "editor_open": editor_open,
+                "parameters": values,
+            }
+        )
+
+    @routes.post("/comfy-audiohost/parameters")
+    async def parameters(request):
+        body = await request.json()
+        try:
+            description = lookup_plugin(str(body.get("plugin") or ""))
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        try:
+            probed = await asyncio.to_thread(probe_parameters, description)
+        except Exception as exc:
+            return web.json_response({"error": str(exc)}, status=500)
+        return web.json_response({"parameters": probed})
+
+    @routes.post("/comfy-audiohost/set-parameter")
+    async def apply_parameter(request):
+        body = await request.json()
+        value = body.get("value")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return web.json_response(
+                {"error": "value must be a number between 0 and 1"}, status=400
+            )
+        try:
+            await asyncio.to_thread(
+                set_parameter,
+                str(body.get("node_id") or ""),
+                str(body.get("parameter_id") or ""),
+                float(value),
+            )
+        except KeyError:
+            return web.json_response({"error": "no editor session for this node"}, status=404)
+        except (ValueError, AudioHostError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        return web.json_response({"ok": True})
 
     @routes.post("/comfy-audiohost/buses")
     async def buses(request):

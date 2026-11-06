@@ -12,7 +12,12 @@ import {
   resetPluginDependentState,
   syncPluginChoices,
 } from "./comfy_audiohost/plugin_list.js";
-import { toggleEditor, updateEditorButton } from "./comfy_audiohost/session.js";
+import {
+  closeSession,
+  stopStatePolling,
+  toggleEditor,
+  updateEditorButton,
+} from "./comfy_audiohost/session.js";
 import { scheduleBusSync, scheduleNodeInputSync } from "./comfy_audiohost/sidechain.js";
 import { fitNodeSize, getWidget } from "./comfy_audiohost/utils.js";
 

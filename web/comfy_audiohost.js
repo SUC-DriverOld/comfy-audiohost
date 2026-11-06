@@ -6,6 +6,7 @@ const STATE_WIDGET = "plugin_state";
 const PARAMS_WIDGET = "param_values";
 const POLL_INTERVAL_MS = 3000;
 const MAX_SIDECHAIN_SLOTS = 3;
+const PARAM_INPUT_SLOTS = 8;
 const NODE_WIDTH = 300;
 
 function getWidget(node, name) {
@@ -163,15 +164,21 @@ function saveAddedParams(node, map) {
   if (widget) widget.value = JSON.stringify(map);
 }
 
-// Rebuild the dynamic slider rows from the param_values JSON and the probed
-// metadata. Each parameter gets its own slider plus a "×" button that removes
-// exactly that row; none of these widgets serialize (values live in
-// param_values), so workflow round-trips stay positional-safe.
+// Rebuild the dynamic parameter rows from the param_values JSON and the
+// probed metadata. Unbound rows get a slider in native units (or normalized
+// when no range was measurable) plus "×" and "→ Input" buttons; rows bound to
+// an input slot keep only the buttons, and the slot itself carries the value.
+// None of these widgets serialize (values live in param_values), so workflow
+// round-trips stay positional-safe.
 function rebuildParamWidgets(node) {
   const widgets = node.widgets ?? [];
   for (let index = widgets.length - 1; index >= 0; index -= 1) {
     const name = String(widgets[index]?.name ?? "");
-    if (name.startsWith("param:") || name.startsWith("param-remove:")) {
+    if (
+      name.startsWith("param:") ||
+      name.startsWith("param-remove:") ||
+      name.startsWith("param-link:")
+    ) {
       if (typeof node.removeWidget === "function") {
         node.removeWidget(widgets[index]);
       } else {
@@ -181,22 +188,28 @@ function rebuildParamWidgets(node) {
   }
   const map = addedParams(node);
   for (const [id, spec] of Object.entries(map)) {
-    const meta = (node.audioHostParams ?? []).find((param) => param.id === id);
-    const step = meta?.steps > 1 ? 1 / (meta.steps - 1) : 0.001;
-    const widget = node.addWidget(
-      "number",
-      spec.name,
-      Number(spec.value) || 0,
-      (value) => onParamChanged(node, id, value),
-      { min: 0, max: 1, step }
-    );
-    widget.name = paramWidgetName(id);
-    widget.label = spec.name;
-    widget.serialize = false;
+    if (spec.slot == null) {
+      const meta = (node.audioHostParams ?? []).find((param) => param.id === id);
+      const step = meta?.steps > 1 ? 1 / (meta.steps - 1) : 0.001;
+      const widget = node.addWidget(
+        "number",
+        spec.name,
+        Number(spec.value) || 0,
+        (value) => onParamChanged(node, id, value),
+        { min: 0, max: 1, step }
+      );
+      widget.name = paramWidgetName(id);
+      widget.label = spec.name;
+      widget.serialize = false;
+    }
     const remove = node.addWidget("button", "×", null, () => removeParam(node, id));
     remove.name = `param-remove:${id}`;
     remove.label = "×";
     remove.serialize = false;
+    const toggle = node.addWidget("button", "→ Input", null, () => toggleParamInput(node, id));
+    toggle.name = `param-link:${id}`;
+    toggle.label = spec.slot == null ? "→ Input" : "← Slider";
+    toggle.serialize = false;
   }
   fitNodeSize(node);
 }
@@ -207,12 +220,40 @@ function removeParam(node, id) {
   delete map[id];
   saveAddedParams(node, map);
   rebuildParamWidgets(node);
+  scheduleNodeInputSync(node);
+}
+
+// Bind a parameter row to one of the node's FLOAT input slots (or unbind it).
+// The slot name/number mapping is recorded in param_values, so execution and
+// workflow round-trips know exactly which linked value belongs to which
+// parameter.
+function toggleParamInput(node, id) {
+  const map = addedParams(node);
+  const spec = map[id];
+  if (!spec) return;
+  if (spec.slot == null) {
+    const used = new Set(
+      Object.values(map).map((entry) => entry.slot).filter((slot) => slot != null)
+    );
+    let slot = 1;
+    while (slot <= PARAM_INPUT_SLOTS && used.has(slot)) slot += 1;
+    if (slot > PARAM_INPUT_SLOTS) {
+      console.warn(`[comfy-audiohost] at most ${PARAM_INPUT_SLOTS} linked parameters per node`);
+      return;
+    }
+    spec.slot = slot;
+  } else {
+    delete spec.slot;
+  }
+  saveAddedParams(node, map);
+  rebuildParamWidgets(node);
+  scheduleNodeInputSync(node);
 }
 
 function onParamChanged(node, id, value) {
   const map = addedParams(node);
   if (!map[id]) return;
-  map[id].value = value;
+  map[id].value = Number(value);
   saveAddedParams(node, map);
   // Mirror the change into the live editor session, if one exists; without a
   // session the override is still applied at execution time.
@@ -220,7 +261,7 @@ function onParamChanged(node, id, value) {
     api.fetchApi("/comfy-audiohost/set-parameter", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ node_id: String(node.id), parameter_id: String(id), value }),
+      body: JSON.stringify({ node_id: String(node.id), parameter_id: String(id), value: Number(value) }),
     }).catch(() => {});
   }
 }
@@ -325,7 +366,7 @@ function resetPluginDependentState(node) {
 }
 
 // ---------------------------------------------------------------------------
-// Sidechain slots
+// Input slots: main audio + sidechains + linked parameter slots
 // ---------------------------------------------------------------------------
 
 function disconnectInput(node, index) {
@@ -342,15 +383,31 @@ function sidechainCount(node) {
   return inputs.filter((bus) => !bus.main && bus.channels > 0).length;
 }
 
-// Manage the node's input slots to exactly ["audio", sidechain_1..N] where N
-// is the probed auxiliary input bus count. Follows the comfy-mss ensemble
-// node's deferred-sync pattern so slots are never touched while litegraph is
-// still restoring a loaded workflow's links.
-function syncSidechainInputs(node) {
+function boundParamSlots(node) {
+  const entries = [];
+  for (const spec of Object.values(addedParams(node))) {
+    if (spec.slot != null) {
+      entries.push({ slot: spec.slot, name: `param_${spec.slot}`, label: spec.name });
+    }
+  }
+  return entries.sort((a, b) => a.slot - b.slot);
+}
+
+// Manage the node's input slots to exactly ["audio", sidechain_1..N,
+// param_X...] where N is the probed auxiliary bus count and param_X are the
+// parameter rows bound with "→ Input". Follows the comfy-mss ensemble node's
+// deferred-sync pattern so slots are never touched while litegraph is still
+// restoring a loaded workflow's links.
+function syncNodeInputs(node) {
   const count = Math.min(sidechainCount(node), MAX_SIDECHAIN_SLOTS);
+  const bound = boundParamSlots(node);
+  const types = { audio: "AUDIO" };
+  for (let index = 1; index <= count; index += 1) types[`sidechain_${index}`] = "AUDIO";
+  for (const entry of bound) types[entry.name] = "FLOAT";
   const desired = [
     "audio",
     ...Array.from({ length: count }, (_value, index) => `sidechain_${index + 1}`),
+    ...bound.map((entry) => entry.name),
   ];
 
   node.inputs ||= [];
@@ -373,19 +430,21 @@ function syncSidechainInputs(node) {
         const [existing] = node.inputs.splice(existingIndex, 1);
         node.inputs.splice(index, 0, existing);
       } else {
-        node.addInput(name, "AUDIO");
+        node.addInput(name, types[name] ?? "*");
         const [created] = node.inputs.splice(node.inputs.length - 1, 1);
         node.inputs.splice(index, 0, created);
       }
     }
+    const binding = bound.find((entry) => entry.name === name);
+    if (binding) node.inputs[index].label = binding.label;
   }
   node.inputs.length = desired.length;
   fitNodeSize(node);
 }
 
-function scheduleSidechainSync(node) {
-  setTimeout(() => syncSidechainInputs(node), 0);
-  setTimeout(() => syncSidechainInputs(node), 250);
+function scheduleNodeInputSync(node) {
+  setTimeout(() => syncNodeInputs(node), 0);
+  setTimeout(() => syncNodeInputs(node), 250);
 }
 
 async function requestBuses(node) {
@@ -399,7 +458,7 @@ async function requestBuses(node) {
   if (!response.ok) throw new Error(await response.text());
   const data = await response.json();
   node.audioHostBuses = data.buses;
-  syncSidechainInputs(node);
+  syncNodeInputs(node);
 }
 
 function scheduleBusSync(node) {
@@ -425,7 +484,7 @@ function registerAudioHostNode(nodeType) {
       pluginWidget.callback = (value, canvas, node, pos, event) => {
         const callbackResult = callback?.call(pluginWidget, value, canvas, node, pos, event);
         resetPluginDependentState(this);
-        scheduleSidechainSync(this);
+        scheduleNodeInputSync(this);
         return callbackResult;
       };
     }
@@ -453,7 +512,7 @@ function registerAudioHostNode(nodeType) {
 
     updateCaptureLabel(this);
     fitNodeSize(this);
-    scheduleSidechainSync(this);
+    scheduleNodeInputSync(this);
     syncPluginChoices(this);
     requestParams(this);
     return result;
@@ -464,7 +523,7 @@ function registerAudioHostNode(nodeType) {
     const result = onConfigure?.apply(this, args);
     updateCaptureLabel(this);
     fitNodeSize(this);
-    scheduleSidechainSync(this);
+    scheduleNodeInputSync(this);
     scheduleBusSync(this);
     requestParams(this);
     return result;

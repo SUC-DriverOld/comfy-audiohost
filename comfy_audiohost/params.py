@@ -50,7 +50,7 @@ def probe_parameters(description):
     Loads the plugin once in a disposable worker and caches the result on disk
     keyed by path, class id, and version. Each entry carries ``id``, ``name``,
     ``default``, ``steps`` (VST3 only, None when continuous), and ``read_only``;
-    values are the plugin's normalized [0, 1] range.
+    values use the plugin's normalized [0, 1] range.
     """
     key = (description.path, description.id)
     with _lock:

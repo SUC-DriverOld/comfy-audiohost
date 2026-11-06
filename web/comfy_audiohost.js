@@ -186,11 +186,13 @@ function rebuildParamWidgets(node) {
     slider.label = spec.name;
     slider.serialize = false;
     // Narrow the slider's own drawing so the inline "Delete" button fits.
-    // +12 claws back most of the widget margin so the slider ends ~6px from
-    // the button, and widget.width mirrors the value because the frontend
-    // sizes the +/- arrow click zones from width || node width.
+    // Derive the width from the node size, NOT the width argument: the
+    // frontend feeds widget.width back into subsequent draw calls, so using
+    // the argument would shrink the slider a little more every frame.
+    // widget.width mirrors the value because the frontend sizes the +/- arrow
+    // click zones from width || node width.
     slider.draw = (ctx, canvas, width, showText) => {
-      slider.width = Math.max(60, width - REMOVE_STRIP + 12);
+      slider.width = Math.max(60, node.size[0] - REMOVE_STRIP + 12);
       slider.drawWidget(ctx, { width: slider.width, showText: showText !== false });
     };
   }

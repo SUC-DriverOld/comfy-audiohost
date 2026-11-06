@@ -221,8 +221,8 @@ function drawRemoveButtons(ctx, node) {
     const width = REMOVE_STRIP - 8;
     const height = Math.max(12, (widget.height ?? 20) - 3);
     ctx.save();
-    ctx.fillStyle = "rgba(64, 64, 70, 0.95)";
-    ctx.strokeStyle = "#808088";
+    ctx.fillStyle = "#222222";
+    ctx.strokeStyle = "#666666";
     ctx.lineWidth = 1;
     if (typeof ctx.roundRect === "function") {
       ctx.beginPath();
@@ -233,7 +233,7 @@ function drawRemoveButtons(ctx, node) {
       ctx.fillRect(x, y, width, height);
       ctx.strokeRect(x + 0.5, y + 0.5, width, height);
     }
-    ctx.fillStyle = "#ecEcF0";
+    ctx.fillStyle = "#DDDDDD";
     ctx.font = "10px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";

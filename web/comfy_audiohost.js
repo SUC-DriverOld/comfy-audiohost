@@ -29,15 +29,6 @@ function fitNodeSize(node) {
   node.setDirtyCanvas(true, true);
 }
 
-function updateCaptureLabel(node) {
-  const button = node.audiohostCaptureButton;
-  if (!button) return;
-  const value = String(getWidget(node, STATE_WIDGET)?.value ?? "");
-  const size = value ? `${Math.max(1, Math.round((value.length * 0.75) / 1024))} KB` : null;
-  button.label = size ? `Capture Plugin State (saved: ${size})` : "Capture Plugin State";
-  node.setDirtyCanvas(true, true);
-}
-
 function closeSession(node) {
   if (node.id == null) return;
   api.fetchApi("/comfy-audiohost/close", {
@@ -70,7 +61,6 @@ async function captureState(node) {
   const widget = getWidget(node, STATE_WIDGET);
   if (widget && widget.value !== data.state) {
     widget.value = data.state;
-    updateCaptureLabel(node);
   }
   applyLiveParameters(node, data.parameters);
   // The editor window was closed (by the user or the plugin): the final state
@@ -491,9 +481,6 @@ function registerAudioHostNode(nodeType) {
     this.addWidget("button", "Open Plugin Editor", null, () => {
       openEditor(this).catch((error) => console.error("[comfy-audiohost]", error));
     });
-    this.audiohostCaptureButton = this.addWidget("button", "Capture Plugin State", null, () => {
-      captureState(this).catch((error) => console.error("[comfy-audiohost]", error));
-    });
 
     // litegraph throws when a combo widget is created without values.
     this.audioHostParamPicker = this.addWidget(
@@ -506,7 +493,6 @@ function registerAudioHostNode(nodeType) {
     this.audioHostParamPicker.serialize = false;
     this.addWidget("button", "Add Parameter", null, () => addSelectedParam(this));
 
-    updateCaptureLabel(this);
     fitNodeSize(this);
     scheduleNodeInputSync(this);
     syncPluginChoices(this);
@@ -517,7 +503,6 @@ function registerAudioHostNode(nodeType) {
   const onConfigure = nodeType.prototype.onConfigure;
   nodeType.prototype.onConfigure = function (...args) {
     const result = onConfigure?.apply(this, args);
-    updateCaptureLabel(this);
     fitNodeSize(this);
     scheduleNodeInputSync(this);
     scheduleBusSync(this);

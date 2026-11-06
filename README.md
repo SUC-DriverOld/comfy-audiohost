@@ -41,10 +41,9 @@ Buttons (added by the web extension):
   background on first startup.
 - **Open Plugin Editor** — opens the effect's native editor window. The effect
   is loaded with the state currently saved on the node, so tweaking continues
-  from there.
-- **Capture Plugin State** — copies the live effect's current settings into the
-  workflow. While an editor is open, this also happens automatically every few
-  seconds.
+  from there. While the editor is open, its state and parameter values are
+  captured automatically every few seconds, and one final capture happens when
+  the window closes — no manual saving needed.
 
 ## How plugin state persists
 
